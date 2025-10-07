@@ -90,15 +90,26 @@ class DeltaDatasink(Datasink[List["AddAction"]]):
         return WriteMode(mode)
 
     def on_write_start(self) -> None:
-        """Check ERROR and IGNORE modes before writing files."""
+        """Check ERROR and IGNORE modes before writing files to prevent wasted I/O."""
         _check_import(self, module="deltalake", package="deltalake")
 
         existing_table = try_get_deltatable(self.path, self.storage_options)
 
+        # For ERROR mode, fail immediately if table exists
         if self.mode == WriteMode.ERROR and existing_table:
             raise ValueError(
                 f"Delta table already exists at {self.path}. "
                 f"Use mode='append' or 'overwrite'."
+            )
+        
+        # For IGNORE mode, fail immediately if table exists to prevent wasted computation
+        # Note: This is a deliberate early exit to save I/O operations
+        if self.mode == WriteMode.IGNORE and existing_table:
+            # We raise a special exception that should be caught and handled gracefully
+            # by the calling code to skip the write entirely
+            raise FileExistsError(
+                f"Delta table already exists at {self.path}. "
+                f"Skipping write due to mode='ignore'."
             )
 
     def write(
@@ -160,28 +171,32 @@ class DeltaDatasink(Datasink[List["AddAction"]]):
     def _partition_table(
         self, table: pa.Table, partition_cols: List[str]
     ) -> Dict[tuple, pa.Table]:
-        """Partition table by columns."""
+        """Partition table by columns efficiently in a single pass."""
         import pyarrow.compute as pc
+        from collections import defaultdict
 
         partitions = {}
 
         if len(partition_cols) == 1:
+            # Single column: use optimized unique + filter
             col = partition_cols[0]
             for val in pc.unique(table[col]):
                 val_py = val.as_py()
                 mask = pc.equal(table[col], val)
                 partitions[(val_py,)] = table.filter(mask)
         else:
-            seen = set()
+            # Multi-column: build partitions in single pass
+            # Group row indices by partition key
+            partition_indices = defaultdict(list)
+            
             for i in range(len(table)):
                 partition_tuple = tuple(table[col][i].as_py() for col in partition_cols)
-                if partition_tuple not in seen:
-                    seen.add(partition_tuple)
-                    mask = None
-                    for j, col in enumerate(partition_cols):
-                        col_mask = pc.equal(table[col], partition_tuple[j])
-                        mask = col_mask if mask is None else pc.and_(mask, col_mask)
-                    partitions[partition_tuple] = table.filter(mask)
+                partition_indices[partition_tuple].append(i)
+            
+            # Create table slices for each partition
+            for partition_tuple, indices in partition_indices.items():
+                # Use take() to select rows by index - more efficient than multiple filters
+                partitions[partition_tuple] = table.take(indices)
 
         return partitions
 
@@ -339,9 +354,15 @@ class DeltaDatasink(Datasink[List["AddAction"]]):
             )
         else:
             # Append to existing table
+            # These checks handle race conditions where table was created
+            # between on_write_start and on_write_complete
             if self.mode == WriteMode.ERROR:
-                raise ValueError(f"Table already exists at {self.path}")
+                raise ValueError(
+                    f"Race condition: Delta table was created at {self.path} "
+                    f"after write started. Data files written but not committed."
+                )
             if self.mode == WriteMode.IGNORE:
+                # Silently skip commit if table was created during write
                 return
 
             mode_value = "overwrite" if self.mode == WriteMode.OVERWRITE else "append"
