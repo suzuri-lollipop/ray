@@ -112,12 +112,23 @@ def read_delta_cdf_distributed(
 
         # Collect batches for this version range
         tables = []
+        schema = None
         for batch in cdf_reader:
+            if schema is None:
+                schema = batch.schema
             if batch.num_rows > 0:
                 tables.append(pa.Table.from_batches([batch]))
 
+        # Return empty table with schema if no data found
+        # This prevents from_arrow_refs from failing with None references
         if not tables:
-            return None
+            if schema is None:
+                # Get schema from the table if no batches were produced
+                arrow_schema = task_dt.schema().to_pyarrow()
+                if cols:
+                    arrow_schema = pa.schema([arrow_schema.field(c) for c in cols])
+                schema = arrow_schema
+            return pa.table({}, schema=schema)
 
         return pa.concat_tables(tables)
 

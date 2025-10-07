@@ -2,12 +2,107 @@
 Delta Lake utility functions for credential management and table operations.
 """
 
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from ray.data._internal.util import _check_import
 
 if TYPE_CHECKING:
     from deltalake import DeltaTable
+
+
+def convert_pyarrow_filter_to_sql(
+    filters: Optional[
+        List[Union[Tuple[str, str, Any], Tuple[Tuple[str, str, Any], ...]]]
+    ]
+) -> Optional[str]:
+    """
+    Convert PyArrow partition filters to Delta Lake SQL predicate format.
+
+    Args:
+        filters: List of filter tuples in PyArrow format.
+            Simple filter: ("column", "operator", value)
+            Conjunctive filter (AND): (("col1", "op1", val1), ("col2", "op2", val2))
+            Multiple filters are combined with OR
+
+    Returns:
+        SQL predicate string or None if no filters
+
+    Examples:
+        >>> convert_pyarrow_filter_to_sql([("year", "=", "2024")])
+        "year = '2024'"
+        >>> convert_pyarrow_filter_to_sql([("age", ">", 18)])
+        "age > 18"
+        >>> convert_pyarrow_filter_to_sql([("id", "in", [1, 2, 3])])
+        "id IN (1, 2, 3)"
+        >>> convert_pyarrow_filter_to_sql([(("year", "=", 2024), ("month", ">", 6))])
+        "(year = 2024 AND month > 6)"
+    """
+    if not filters:
+        return None
+
+    def format_value(value: Any) -> str:
+        """Format a value for SQL."""
+        if value is None:
+            return "NULL"
+        elif isinstance(value, bool):
+            return "TRUE" if value else "FALSE"
+        elif isinstance(value, str):
+            return f"'{value}'"
+        elif isinstance(value, (int, float)):
+            return str(value)
+        else:
+            return f"'{value}'"
+
+    def format_condition(col: str, op: str, value: Any) -> str:
+        """Format a single condition."""
+        op_upper = op.upper()
+
+        if op_upper in ("IN", "NOT IN"):
+            if not isinstance(value, (list, tuple)):
+                raise ValueError(
+                    f"IN/NOT IN operator requires list/tuple value, got {type(value)}"
+                )
+            formatted_values = ", ".join(format_value(v) for v in value)
+            return f"{col} {op_upper} ({formatted_values})"
+        else:
+            return f"{col} {op} {format_value(value)}"
+
+    sql_parts = []
+
+    for filter_item in filters:
+        if not isinstance(filter_item, (tuple, list)):
+            raise ValueError(
+                f"Each filter must be a tuple or list, got {type(filter_item)}"
+            )
+
+        # Check if it's a conjunctive filter (AND) or simple filter
+        if len(filter_item) > 0 and isinstance(filter_item[0], (tuple, list)):
+            # Conjunctive filter: (("col1", "op1", val1), ("col2", "op2", val2))
+            conditions = []
+            for condition in filter_item:
+                if not isinstance(condition, (tuple, list)) or len(condition) != 3:
+                    raise ValueError(
+                        f"Each condition in conjunctive filter must be a 3-tuple, "
+                        f"got {condition}"
+                    )
+                col, op, value = condition
+                conditions.append(format_condition(col, op, value))
+            sql_parts.append(f"({' AND '.join(conditions)})")
+        else:
+            # Simple filter: ("col", "op", value)
+            if len(filter_item) != 3:
+                raise ValueError(
+                    f"Simple filter must be a 3-tuple (column, operator, value), "
+                    f"got {len(filter_item)} elements"
+                )
+            col, op, value = filter_item
+            sql_parts.append(format_condition(col, op, value))
+
+    # Multiple filters are combined with OR
+    if len(sql_parts) == 1:
+        return sql_parts[0]
+    else:
+        return " OR ".join(sql_parts)
 
 
 class AWSUtilities:
@@ -23,12 +118,15 @@ class AWSUtilities:
             credentials = session.get_credentials()
 
             if credentials:
-                return {
+                storage_options = {
                     "AWS_ACCESS_KEY_ID": credentials.access_key,
                     "AWS_SECRET_ACCESS_KEY": credentials.secret_key,
-                    "AWS_SESSION_TOKEN": credentials.token,
                     "AWS_REGION": session.region_name or "us-east-1",
                 }
+                # Only include session token if it exists (for temporary credentials)
+                if credentials.token:
+                    storage_options["AWS_SESSION_TOKEN"] = credentials.token
+                return storage_options
         except Exception:
             pass
         return {}

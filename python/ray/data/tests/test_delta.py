@@ -214,7 +214,6 @@ def test_delta_read_basic(data_path, batch_size, write_mode):
         }
     )
 
-    start_time = time.time()
     if write_mode == "append":
         write_deltalake(path, df, mode=write_mode)
         write_deltalake(path, df, mode=write_mode)
