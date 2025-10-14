@@ -2,7 +2,11 @@
 Delta Lake Change Data Feed (CDF) datasource with streaming execution.
 
 This module provides streaming CDF reading functionality that properly integrates
-with Ray Data's execution model.
+with Ray Data's execution model. Change Data Feed enables incremental processing
+of Delta table changes between versions.
+
+Delta Lake CDF documentation: https://docs.delta.io/latest/delta-change-data-feed.html
+Python deltalake package: https://delta-io.github.io/delta-rs/python/
 """
 
 import logging
@@ -181,8 +185,8 @@ class DeltaCDFDatasource(Datasource):
             This function runs in a Ray worker task and yields batches
             as they are read, enabling true streaming execution.
             """
-            from deltalake import DeltaTable
             import pyarrow as pa
+            from deltalake import DeltaTable
 
             # Load table in worker task (not driver)
             dt = DeltaTable(self.path, storage_options=self.storage_options)

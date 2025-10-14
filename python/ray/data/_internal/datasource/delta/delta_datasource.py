@@ -3,15 +3,15 @@ Delta Lake datasource implementation for reading Delta tables.
 
 This module provides the DeltaDatasource class for reading Delta Lake tables,
 including support for time travel, partition filtering, and Change Data Feed (CDF).
+
+Delta Lake documentation: https://delta.io/
+Python deltalake package: https://delta-io.github.io/delta-rs/python/
 """
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Union
-
-import pyarrow as pa
+from typing import Any, Dict, List, Optional, Union
 
 from ray.data._internal.util import _check_import
-from ray.data.block import Block, BlockMetadata
 from ray.data.datasource import Datasource, ReadTask
 from ray.data.datasource.partitioning import Partitioning
 from ray.util.annotations import PublicAPI

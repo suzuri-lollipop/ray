@@ -1,5 +1,15 @@
 """
 Delta Lake utility functions for credential management and table operations.
+
+This module provides helper functions for:
+- Converting PyArrow filters to Delta Lake SQL predicates
+- Managing cloud storage credentials (AWS, GCP, Azure)
+- Delta table operations and utilities
+
+Dependencies:
+- boto3 for AWS credential detection: https://boto3.amazonaws.com/v1/documentation/api/latest/index.html
+- azure-identity for Azure authentication: https://learn.microsoft.com/en-us/python/api/azure-identity/
+- deltalake Python package: https://delta-io.github.io/delta-rs/python/
 """
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
@@ -135,7 +145,8 @@ def convert_pyarrow_filter_to_sql(
     for filter_item in filters:
         if not isinstance(filter_item, (tuple, list)):
             raise ValueError(
-                f"Each filter must be a tuple or list, got {type(filter_item).__name__}. "
+                f"Each filter must be a tuple or list, "
+                f"got {type(filter_item).__name__}. "
                 f"Expected format: ('column', 'op', value) or "
                 f"(('col1', 'op1', val1), ('col2', 'op2', val2))"
             )

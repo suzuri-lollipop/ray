@@ -1,5 +1,12 @@
 """
 Delta Lake datasink implementation with two-phase commit for ACID compliance.
+
+This module implements write support for Delta Lake tables using the
+deltalake Python package. The implementation follows a two-phase commit
+protocol to ensure ACID guarantees for distributed writes.
+
+Delta Lake documentation: https://delta.io/
+Python deltalake package: https://delta-io.github.io/delta-rs/python/
 """
 
 import json
@@ -341,7 +348,8 @@ class DeltaDatasink(Datasink[List["AddAction"]]):
 
         Args:
             table: PyArrow table containing partition data
-            partition_values: Tuple of partition column values (empty for non-partitioned)
+            partition_values: Tuple of partition column values
+                (empty for non-partitioned tables)
             task_idx: Task index for generating unique filenames across workers
 
         Returns:
@@ -651,7 +659,8 @@ class DeltaDatasink(Datasink[List["AddAction"]]):
             None
 
         Raises:
-            ValueError: If ERROR mode and table was created during write (race condition)
+            ValueError: If ERROR mode and table was created during write
+                (race condition)
 
         Note:
             For IGNORE mode, silently skips commit if table was created during write.
@@ -742,7 +751,8 @@ class DeltaDatasink(Datasink[List["AddAction"]]):
         """
         Commit files to existing Delta table using write transaction.
 
-        Handles race conditions where table was created between write start and complete.
+        Handles race conditions where table was created between write start
+        and complete.
 
         Args:
             existing_table: Existing Delta table object

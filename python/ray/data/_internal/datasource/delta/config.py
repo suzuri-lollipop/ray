@@ -1,5 +1,10 @@
 """
 Configuration classes and enums for Delta Lake datasource.
+
+This module defines configuration dataclasses and enums used for Delta Lake
+write operations, including write modes, JSON encoding, and write options.
+
+Delta Lake documentation: https://delta.io/
 """
 
 import json
